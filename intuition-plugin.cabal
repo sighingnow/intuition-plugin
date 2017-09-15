@@ -19,7 +19,13 @@ library
   hs-source-dirs:      src
   exposed-modules:
     Plugin.Intuition
+    Plugin.Intuition.Context
+    Plugin.Intuition.GHC
     Plugin.Intuition.TypeLevel
+  other-modules:
+    Plugin.Intuition.Backend.Ring
+    Plugin.Intuition.Backend.Simpl
+    Plugin.Intuition.Backend.SMT
   default-language:    Haskell2010
   default-extensions:  NoImplicitPrelude
                      , OverloadedStrings

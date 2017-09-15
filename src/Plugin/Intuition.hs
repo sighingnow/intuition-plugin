@@ -5,21 +5,19 @@
 -- A GHC plugin used to help solve type equality.
 --
 
+{-# LANGUAGE MultiWayIf #-}
+
 module Plugin.Intuition
   ( plugin
   ) where
 
 import Foundation
+import Foundation.Collection
 import Foundation.Primitive
 
-import GhcPlugins
-import TcPluginM
-import TcRnMonad
-import Outputable
-import Type (PredTree(..), classifyPredType)
-import TyCoRep (Type(..), TyLit(..), UnivCoProvenance(..))
-import TcEvidence
-import Coercion (Coercion(..), mkUnivCo)
+import Plugin.Intuition.GHC
+import Plugin.Intuition.Context
+import Plugin.Intuition.Backend.Simpl
 
 plugin :: Plugin
 plugin = defaultPlugin
@@ -43,10 +41,29 @@ findTyCon mname tname = do
   name <- lookupOrig mod (mkTcOcc tname)
   tcLookupTyCon name
 
-newtype Context = Context { runCtx :: () }
-
 pluginInit :: TcPluginM Context
-pluginInit = return $ Context ()
+pluginInit = Context <$> (return []) -- mapM genOp supportedOps
+  where
+    genOp (mname, tname, func) = flip (,) func <$> findTyCon mname tname
+
+-- | Conditional execution of 'Applicative' expressions. For example,
+--
+-- > when debug (putStrLn "Debugging")
+--
+-- will output the string @Debugging@ if the Boolean value @debug@
+-- is 'True', and otherwise do nothing.
+when      :: (Applicative f) => Bool -> f () -> f ()
+{-# INLINEABLE when #-}
+{-# SPECIALISE when :: Bool -> IO () -> IO () #-}
+{-# SPECIALISE when :: Bool -> Maybe () -> Maybe () #-}
+when p s  = if p then s else pure ()
+
+-- | The reverse of 'when'.
+unless            :: (Applicative f) => Bool -> f () -> f ()
+{-# INLINEABLE unless #-}
+{-# SPECIALISE unless :: Bool -> IO () -> IO () #-}
+{-# SPECIALISE unless :: Bool -> Maybe () -> Maybe () #-}
+unless p s        =  if p then pure () else s
 
 pluginSolve ::
      Context
@@ -55,19 +72,27 @@ pluginSolve ::
   -> [Ct]    -- ^ Wanted
   -> TcPluginM TcPluginResult
 pluginSolve ctx given derived wanted = do
-  debug $ ppr given
-  debug $ ppr derived
-  debug $ ppr wanted
+  unless (null wanted) $ do
+    debug $ text "given:"
+    debug $ ppr given
+    debug $ text "derived:"
+    debug $ ppr derived
+    debug $ text "wanted:"
+    debug $ ppr wanted
   (solved, unsolved) <- foldlM (\(done, todo) ct -> do
       r <- intuition ctx given derived ct
       case r of
         Nothing -> return (done, ct : todo)
         Just ev -> return ((ev, ct) : done, todo)
     ) ([], []) wanted
-  tcPluginIO $ do
-    putStrLn "Plugin intuition:"
-    debugIO $ ppr solved
-  return $ TcPluginOk solved unsolved
+  unless (null wanted) $
+    tcPluginIO $ do
+      putStrLn "Plugin intuition: ----------------------"
+      debugIO $ ppr solved
+      putStrLn "----------------------------------------"
+  return $ if null solved
+              then TcPluginOk [] [] -- If the plugin cannot make any progress, it should return TcPluginOk [] []
+              else TcPluginOk solved unsolved
 
 -- | Try solve a single constraint.
 intuition ::
@@ -83,18 +108,13 @@ intuition ctx given derived wanted =
         EqPred NomEq t1 t2 -> do
           gcdtc <- findTyCon "Plugin.Intuition.TypeLevel" "GCD"
           let t1' = simpl gcdtc t1
-          let t2' = simpl gcdtc t2
+              t2' = simpl gcdtc t2
           if t1' `eqType` t2'
             then let ev = EvCoercion $ mkUnivCo (PluginProv "intuition") Nominal t1 t2
                   in return (Just ev)
             else return Nothing
         _ -> return Nothing
     _ -> return Nothing
-
--- eqType :: Type -> Type -> Bool
--- eqType (TyVarTy var1) (TyVarTy var2) = var1 == var2
--- eqType (LitTy lit1) (LitTy lit2) = lit1 == lit2
--- eqType _ _ = False
 
 gcd :: Integer -> Integer -> Integer
 gcd x 0 = x
