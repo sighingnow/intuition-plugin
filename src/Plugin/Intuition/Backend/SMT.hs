@@ -5,22 +5,22 @@
 -- A SMT powered backend for type constraints solving.
 --
 
+{-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
 
 module Plugin.Intuition.Backend.SMT
   ( MonadZ3
+  , Logic(..)
+  , Result(..)
+  , Constraint
+  , Env
   , evalZ3
   , evalZ3With
   , stdOpts
-  , Logic(..)
-  , Result(..)
   , smt
   , formula
   , mkAST
-  , Constraint
-  , Env
-  , debug
   , debugIO
   ) where
 
@@ -29,11 +29,13 @@ import Foundation.Monad (liftIO)
 import Foundation.Collection
 import Foundation.List.DList
 
+import Control.Monad (when)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Maybe
 import Control.Monad.Trans.State.Lazy
 import Z3.Monad
 
+import Plugin.Intuition.Arg
 import Plugin.Intuition.GHC
 
 -- | Given and derived constraints (context) provided to SMT solver.
@@ -43,7 +45,7 @@ type Constraint = DList AST
 type Env = DList App
 
 -- | Check if two 'Type' variables are equal in SMT.
-smt :: MonadZ3 m => Constraint -> Type -> Type -> MaybeT (StateT Env m) EvTerm
+smt :: (?cmdargs :: Arg, MonadZ3 m) => Constraint -> Type -> Type -> MaybeT (StateT Env m) EvTerm
 smt ctx t1 t2 = do
   f1 <- formula t1
   f2 <- formula t2
@@ -55,7 +57,8 @@ smt ctx t1 t2 = do
                then mkEq f1 f2
                else (>>= id) {- join -} $ mkImplies <$> mkAnd (toList ctx) <*> mkEq f1 f2
     prop <- mkForallConst [] (toList env) stat
-    -- debugAST prop
+    when (debug ?cmdargs) $
+      debugAST prop
     assert prop
     check
 
@@ -67,7 +70,7 @@ smt ctx t1 t2 = do
     Undef -> MaybeT $ return Nothing
 
 -- | Translate a Ct to a SMT AST.
-mkAST :: MonadZ3 m => Ct -> MaybeT (StateT Env m) AST
+mkAST :: (?cmdargs :: Arg, MonadZ3 m) => Ct -> MaybeT (StateT Env m) AST
 mkAST ct =
   case ct of
     CNonCanonical (CtWanted pred _ _ _) -> predAST pred
@@ -84,7 +87,7 @@ mkAST ct =
         _ -> MaybeT $ return Nothing
 
 -- | Translate a 'Type' variable to a SMT AST.
-formula :: MonadZ3 m => Type -> MaybeT (StateT Env m) AST
+formula :: (?cmdargs :: Arg, MonadZ3 m) => Type -> MaybeT (StateT Env m) AST
 formula (TyVarTy var) = do
   if | isTyVar var -> do
        case (showSDocUnsafe . ppr $ kind) of
@@ -146,9 +149,6 @@ formula (LitTy lit) =
     StrTyLit s -> MaybeT $ return Nothing
 formula (CastTy cond _) = MaybeT $ return Nothing
 formula (CoercionTy co) = MaybeT $ return Nothing
-
-debug :: SDoc -> TcPluginM ()
-debug = tcPluginIO . debugIO
 
 debugIO :: SDoc -> IO ()
 debugIO = putStrLn . fromList . showSDocUnsafe

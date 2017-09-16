@@ -5,8 +5,10 @@
 -- A GHC plugin used to help solve type equality.
 --
 
+{-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Plugin.Intuition
@@ -14,19 +16,14 @@ module Plugin.Intuition
   ) where
 
 import Foundation
-import Foundation.Collection
-import Foundation.Monad (liftIO)
-import Foundation.Primitive
 
-import Control.Monad (when, unless)
-import Control.Monad.Trans.Class (lift)
+import Control.Monad (when)
 import Control.Monad.Trans.Maybe
 import Control.Monad.Trans.State.Lazy
 
+import Plugin.Intuition.Arg
 import Plugin.Intuition.GHC
 import Plugin.Intuition.Backend.SMT
-
-import Z3.Monad
 
 plugin :: Plugin
 plugin = defaultPlugin
@@ -34,26 +31,34 @@ plugin = defaultPlugin
   }
 
 installTcPlugin :: [CommandLineOption] -> Maybe TcPlugin
-installTcPlugin _ = Just $ TcPlugin
-  { tcPluginInit = return ()
-  , tcPluginSolve = const pluginSolve
+installTcPlugin cmdargs = Just $ TcPlugin
+  { tcPluginInit = pluginInit cmdargs
+  , tcPluginSolve = pluginSolve
   , tcPluginStop = const (return ())
   }
 
+pluginInit :: [CommandLineOption] -> TcPluginM Arg
+pluginInit cmdargs = do
+  let debug = "--debug" `elem` cmdargs
+  return $ Arg debug
+
 pluginSolve ::
-     [Ct]    -- ^ Given
+     Arg
+  -> [Ct]    -- ^ Given
   -> [Ct]    -- ^ Derived
   -> [Ct]    -- ^ Wanted
   -> TcPluginM TcPluginResult
-pluginSolve given derived wanted = do
-  
-  -- unless (null wanted) $ tcPluginIO $ do
-  --   debugIO $ text "given:"
-  --   debugIO $ ppr given
-  --   debugIO $ text "derived:"
-  --   debugIO $ ppr derived
-  --   debugIO $ text "wanted:"
-  --   debugIO $ ppr wanted
+pluginSolve cmdargs@Arg{..} given derived wanted = do
+
+  when debug $ tcPluginIO $ do
+    debugIO $ text "given:"
+    debugIO $ ppr given
+    debugIO $ text "derived:"
+    debugIO $ ppr derived
+    debugIO $ text "wanted:"
+    debugIO $ ppr wanted
+
+  let ?cmdargs = cmdargs
 
   (solved, unsolved) <- tcPluginIO $
     -- evalZ3With (Just QF_LIA) stdOpts $ do
@@ -80,11 +85,11 @@ pluginSolve given derived wanted = do
               Just ev -> return ((ev, ct) : done, todo)
         foldlM iter ([], []) wanted
 
-  -- unless (null wanted) $
-  --   tcPluginIO $ do
-  --     putStrLn "Plugin intuition: ----------------------"
-  --     debugIO $ ppr solved
-  --     putStrLn "----------------------------------------"
+  when debug $
+    tcPluginIO $ do
+      putStrLn "Plugin intuition: ----------------------"
+      debugIO $ ppr solved
+      putStrLn "----------------------------------------"
 
   return $ if null solved
               then TcPluginOk [] [] -- If the plugin cannot make any progress, it should return TcPluginOk [] []
@@ -93,7 +98,7 @@ pluginSolve given derived wanted = do
 
 -- | Try solve a single constraint.
 intuition ::
-     MonadZ3 m
+     (?cmdargs :: Arg, MonadZ3 m)
   => Constraint
   -> [Ct]
   -> [Ct]
