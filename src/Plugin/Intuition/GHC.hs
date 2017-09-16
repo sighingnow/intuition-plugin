@@ -38,8 +38,13 @@ module Plugin.Intuition.GHC
   , Type(..)
   , TyLit(..)
   , TyCon(..)
+  , Var
   , PredTree(..)
   , EqRel(..)
+  , varName
+  , varUnique
+  , varType
+  , isTyVar
   , eqType
   , classifyPredType
     -- * Evidence
@@ -74,6 +79,7 @@ import TcRnTypes (Ct(..))
 import CoAxiom (Role(..))
 import TyCoRep (Type(..), TyLit(..))
 import TyCon (TyCon(..))
+import Var (Var, varName, varUnique, varType, isTyVar)
 import Type (PredTree(..), EqRel(..), eqType, classifyPredType)
 -- | Evidence
 import TcRnTypes (CtEvidence(..))

@@ -6,7 +6,7 @@
 
 module Main where
 
-import Test.Gcd
+import Test.Nat ()
 
 main :: IO ()
 main = return ()
