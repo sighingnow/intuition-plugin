@@ -16,6 +16,7 @@ module Plugin.Intuition
   ) where
 
 import Foundation
+import Foundation.Collection
 
 import Control.Monad (when)
 import Control.Monad.Trans.Maybe
@@ -50,7 +51,7 @@ pluginSolve ::
   -> TcPluginM TcPluginResult
 pluginSolve cmdargs@Arg{..} given derived wanted = do
 
-  when debug $ tcPluginIO $ do
+  when (debug && (not . null) wanted) $ tcPluginIO $ do
     debugIO $ text "given:"
     debugIO $ ppr given
     debugIO $ text "derived:"
@@ -61,8 +62,8 @@ pluginSolve cmdargs@Arg{..} given derived wanted = do
   let ?cmdargs = cmdargs
 
   (solved, unsolved) <- tcPluginIO $
-    -- evalZ3With (Just QF_LIA) stdOpts $ do
-    evalZ3With Nothing stdOpts $ do
+    evalZ3With (Just QF_LIA) stdOpts $ do
+    -- evalZ3With Nothing stdOpts $ do
       -- prepare given and derived
       (ctx, env) <- flip runStateT (mempty :: Env) $ do
         let
@@ -85,7 +86,7 @@ pluginSolve cmdargs@Arg{..} given derived wanted = do
               Just ev -> return ((ev, ct) : done, todo)
         foldlM iter ([], []) wanted
 
-  when debug $
+  when (debug && (not . null) wanted) $
     tcPluginIO $ do
       putStrLn "Plugin intuition: ----------------------"
       debugIO $ ppr solved
