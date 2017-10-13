@@ -93,7 +93,7 @@ pluginSolve cmdargs@Arg{..} given derived wanted = do
       putStrLn "----------------------------------------"
 
   return $ if null solved
-              then TcPluginOk [] [] -- If the plugin cannot make any progress, it should return TcPluginOk [] []
+              then TcPluginOk [] []     -- If the plugin cannot make any progress, it should return TcPluginOk [] []
               else TcPluginOk solved [] -- the second arg is new works, not unsolved old works,
                                         -- see https://ghc.haskell.org/trac/ghc/wiki/Plugins/TypeChecker#Callingpluginsfromthetypechecker
 

@@ -29,6 +29,7 @@ import Foundation.Monad (liftIO)
 import Foundation.Collection
 import Foundation.List.DList
 
+import qualified Prelude
 import Control.Monad (when)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Maybe
@@ -90,6 +91,9 @@ mkAST ct =
 formula :: (?cmdargs :: Arg, MonadZ3 m) => Type -> MaybeT (StateT Env m) AST
 formula (TyVarTy var) = do
   if | isTyVar var -> do
+       when (debug ?cmdargs) $
+         liftIO . debugIO $ ppr kind
+
        case (showSDocUnsafe . ppr $ kind) of
          "Nat" -> do
 
@@ -122,13 +126,38 @@ formula (AppTy f x) = do
   lift $ lift $ debugNotImplemented "AppTy"
   MaybeT $ return Nothing
 formula (TyConApp op args) = do
+  when (debug ?cmdargs) $
+    liftIO . debugIO $ ppr op
+
   case (showSDocUnsafe . ppr $ op) of
     "+" -> mkArgs args >>= lift . lift . mkAdd
     "*" -> mkArgs args >>= lift . lift . mkMul
     "^" -> MaybeT $ return Nothing        -- currently, (^) is not supported
     "-" -> mkArgs args >>= \case
-                              [a] -> lift $ lift $ mkUnaryMinus a
-                              as -> lift $ lift $ mkSub as
+      [a] -> lift $ lift $ mkUnaryMinus a
+      as -> lift $ lift $ mkSub as
+    "Nat" -> lift $ lift $ do
+      sym <- mkStringSymbol "Nat"
+      sort <- mkUninterpretedSort sym
+      mkFreshConst "Nat" sort
+    "Min" -> do
+      mkArgs args >>= \case
+        [_, a, b] -> do
+          a' <- lift . lift . getNumeralString $ a
+          b' <- lift . lift . getNumeralString $ b
+          if (null a' || null b') -- a or b is not a number literal
+            then MaybeT $ return Nothing
+            else lift $ lift $ mkIntNum (min (Prelude.read a' :: Int) (Prelude.read b' :: Int))
+        _ -> MaybeT $ return Nothing
+    "Max" -> do
+      mkArgs args >>= \case
+        [_, a, b] -> do
+          a' <- lift . lift . getNumeralString $ a
+          b' <- lift . lift . getNumeralString $ b
+          if (null a' || null b') -- a or b is not a number literal
+            then MaybeT $ return Nothing
+            else lift $ lift $ mkIntNum (max (Prelude.read a' :: Int) (Prelude.read b' :: Int))
+        _ -> MaybeT $ return Nothing
     _ -> do
       lift $ lift $ debugNotImplemented "TyConApp for not +/*/-"
       MaybeT $ return Nothing
@@ -136,6 +165,7 @@ formula (TyConApp op args) = do
       mkArgs as = case as of
         [a] -> sequence $ [formula a]
         [a, b] -> sequence $ [formula a, formula b]
+        [a, b, c] -> sequence $ [formula a, formula b, formula c]
         _ -> MaybeT $ return Nothing
 formula (ForAllTy _ t) = do
   lift $ lift $ debugNotImplemented "ForAllTy"
