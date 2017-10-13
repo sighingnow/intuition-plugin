@@ -136,28 +136,43 @@ formula (TyConApp op args) = do
     "-" -> mkArgs args >>= \case
       [a] -> lift $ lift $ mkUnaryMinus a
       as -> lift $ lift $ mkSub as
-    "Nat" -> lift $ lift $ do
-      sym <- mkStringSymbol "Nat"
-      sort <- mkUninterpretedSort sym
-      mkFreshConst "Nat" sort
-    "Min" -> do
-      mkArgs args >>= \case
-        [_, a, b] -> do
-          a' <- lift . lift . getNumeralString $ a
-          b' <- lift . lift . getNumeralString $ b
-          if (null a' || null b') -- a or b is not a number literal
-            then MaybeT $ return Nothing
-            else lift $ lift $ mkIntNum (min (Prelude.read a' :: Int) (Prelude.read b' :: Int))
-        _ -> MaybeT $ return Nothing
-    "Max" -> do
-      mkArgs args >>= \case
-        [_, a, b] -> do
-          a' <- lift . lift . getNumeralString $ a
-          b' <- lift . lift . getNumeralString $ b
-          if (null a' || null b') -- a or b is not a number literal
-            then MaybeT $ return Nothing
-            else lift $ lift $ mkIntNum (max (Prelude.read a' :: Int) (Prelude.read b' :: Int))
-        _ -> MaybeT $ return Nothing
+
+    "Nat" -> do
+      -- step 1. create Z3 symbol and sort
+      (var, app) <- lift $
+       lift $ do
+         -- NOTICE (TODO) the @var@ can only be made via @sym@ and @sort@, if perform `mkFreshConst` and then use `toApp`,
+         -- the result proposition would be unsolvable.
+         sym <- mkStringSymbol "Nat"
+         sort <- mkUninterpretedSort sym
+         var <- mkConst sym sort
+         app <- toApp var
+         return (var, app)
+
+      -- step 2. put new symbol into environment.
+      lift $ modify (app `cons`)
+
+      -- step 3. return new AST for this variable.
+      lift $ return var
+
+    "Min" -> mkArgs args >>= \case
+      [_, a, b] -> do
+        a' <- lift . lift . getNumeralString $ a
+        b' <- lift . lift . getNumeralString $ b
+        if (null a' || null b') -- a or b is not a number literal
+          then MaybeT $ return Nothing
+          else lift $ lift $ mkIntNum (min (Prelude.read a' :: Int) (Prelude.read b' :: Int))
+      _ -> MaybeT $ return Nothing
+
+    "Max" -> mkArgs args >>= \case
+      [_, a, b] -> do
+        a' <- lift . lift . getNumeralString $ a
+        b' <- lift . lift . getNumeralString $ b
+        if (null a' || null b') -- a or b is not a number literal
+          then MaybeT $ return Nothing
+          else lift $ lift $ mkIntNum (max (Prelude.read a' :: Int) (Prelude.read b' :: Int))
+      _ -> MaybeT $ return Nothing
+
     _ -> do
       lift $ lift $ debugNotImplemented "TyConApp for not +/*/-"
       MaybeT $ return Nothing
