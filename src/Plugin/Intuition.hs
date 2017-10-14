@@ -95,15 +95,18 @@ pluginSolve cmdargs@Arg{..} given derived wanted = do
         foldlM iter ([], []) wanted
 
   -- Solver based on pure GHC API (needs TcPluginM), perform custom Simpl solver
-  (solved2, newly2) <- do
-      let
-        iter (done, newly) ct = do
-          r <- runMaybeT $
-            intuitionSimpl given derived ct
-          case r of
-            Just (DictCan ev ct') -> return ((ev, ct) : done, ct' : newly)
-            Nothing -> return (done, newly)
-      foldlM iter ([], []) wanted
+  -- (solved2, newly2) <- do
+  --     let
+  --       iter (done, newly) ct = do
+  --         r <- runMaybeT $
+  --           intuitionSimpl given derived ct
+  --         case r of
+  --           Just (DictCan ev ct') -> return ((ev, ct) : done, ct' : newly)
+  --           Nothing -> return (done, newly)
+  --     foldlM iter ([], []) wanted
+
+  let solved2 = []
+      newly2 = []
 
   let solved = solved1 <> solved2
       newly = newly1 <> newly2

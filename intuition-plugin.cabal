@@ -21,6 +21,7 @@ library
     Plugin.Intuition
     Plugin.Intuition.Arg
     Plugin.Intuition.GHC
+    Plugin.Intuition.KnownNat
   other-modules:
     Plugin.Intuition.Backend.Ring
     Plugin.Intuition.Backend.Simpl
@@ -31,6 +32,8 @@ library
   build-depends:       base >= 4.8 && < 5
                      , foundation
                      , ghc
+                     , ghc-typelits-knownnat
+                     , singletons
                      , transformers
                      , z3 >= 4.0.0
 
