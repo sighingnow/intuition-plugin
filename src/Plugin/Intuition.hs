@@ -17,13 +17,16 @@ module Plugin.Intuition
 
 import Foundation
 import Foundation.Collection
+import Foundation.Monad (liftIO)
 
 import Control.Monad (when)
+import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Maybe
 import Control.Monad.Trans.State.Lazy
 
 import Plugin.Intuition.Arg
 import Plugin.Intuition.GHC
+import Plugin.Intuition.Backend.Simpl
 import Plugin.Intuition.Backend.SMT
 
 plugin :: Plugin
@@ -37,6 +40,10 @@ installTcPlugin cmdargs = Just $ TcPlugin
   , tcPluginSolve = pluginSolve
   , tcPluginStop = const (return ())
   }
+
+-- | Progress given by the intuition plugin.
+data Progress = DictCan EvTerm Ct     -- ^ The CDictCan is simplified.
+              | NonCanonical EvTerm   -- ^ The CNonCanonical is given a proof (EvTerm)
 
 pluginInit :: [CommandLineOption] -> TcPluginM Arg
 pluginInit cmdargs = do
@@ -61,7 +68,8 @@ pluginSolve cmdargs@Arg{..} given derived wanted = do
 
   let ?cmdargs = cmdargs
 
-  (solved, unsolved) <- tcPluginIO $
+  -- Solver based on Z3 (needs IO)
+  (solved1, newly1) <- tcPluginIO $
     evalZ3With (Just QF_LIA) stdOpts $ do
     -- evalZ3With Nothing stdOpts $ do
       -- prepare given and derived
@@ -78,37 +86,87 @@ pluginSolve cmdargs@Arg{..} given derived wanted = do
       -- perform SMT solver.
       flip evalStateT env $ do
         let
-          iter (done, todo) ct = do
+          iter (done, newly) ct = do
             r <- runMaybeT $
-              intuition ctx given derived ct
+              intuitionZ3 ctx given derived ct
             case r of
-              Nothing -> return (done, ct : todo)
-              Just ev -> return ((ev, ct) : done, todo)
+              Just (NonCanonical ev) -> return ((ev, ct) : done, newly)
+              Nothing -> return (done, newly)
         foldlM iter ([], []) wanted
+
+  -- Solver based on pure GHC API (needs TcPluginM), perform custom Simpl solver
+  (solved2, newly2) <- do
+      let
+        iter (done, newly) ct = do
+          r <- runMaybeT $
+            intuitionSimpl given derived ct
+          case r of
+            Just (DictCan ev ct') -> return ((ev, ct) : done, ct' : newly)
+            Nothing -> return (done, newly)
+      foldlM iter ([], []) wanted
+
+  let solved = solved1 <> solved2
+      newly = newly1 <> newly2
 
   when (debug && (not . null) wanted) $
     tcPluginIO $ do
       putStrLn "Plugin intuition: ----------------------"
       debugIO $ ppr solved
       putStrLn "----------------------------------------"
+      debugIO $ ppr newly
+      putStrLn "----------------------------------------"
 
-  return $ if null solved
-              then TcPluginOk [] []     -- If the plugin cannot make any progress, it should return TcPluginOk [] []
-              else TcPluginOk solved [] -- the second arg is new works, not unsolved old works,
-                                        -- see https://ghc.haskell.org/trac/ghc/wiki/Plugins/TypeChecker#Callingpluginsfromthetypechecker
+  -- return $ if null solved
+  --             then TcPluginOk [] newly     -- If the plugin cannot make any progress, it should return TcPluginOk [] []
+  --             else TcPluginOk solved newly -- the second arg is new works, not unsolved old works,
+  --                                          -- see https://ghc.haskell.org/trac/ghc/wiki/Plugins/TypeChecker#Callingpluginsfromthetypechecker
+  return $ TcPluginOk solved newly
 
 -- | Try solve a single constraint.
-intuition ::
+intuitionSimpl ::
+     (?cmdargs :: Arg)
+  => [Ct]
+  -> [Ct]
+  -> Ct
+  -> MaybeT TcPluginM Progress
+intuitionSimpl given derived wanted =
+  case wanted of
+    CDictCan (CtWanted pred _ _ loc) cls ts pendsc ->
+      case classifyPredType pred of
+        ClassPred pcls pts -> do
+          let iter ty (rty, simplified) = let (ty', simplified') = runState (simpl ty) simplified
+                                           in (ty' : rty, simplified || simplified')
+          let (rty, simplified) = foldr iter ([], False) pts
+          if simplified
+            then MaybeT $ do
+              let con' = case pred of
+                            TyConApp con kts -> con
+                            _ -> error "intuition.CDictCan: impossible happens!"
+                  pred' = TyConApp con' rty
+                  ts' = rty
+              ev' <- newWanted loc pred'
+              let ct' = CDictCan ev' cls ts' pendsc
+                  evterm = EvCoercion $ mkTyConAppCo Nominal
+                                                     con'
+                                                     (fmap (\(t, t') ->
+                                                       mkUnivCo (PluginProv "intuition with SMT") Nominal t t') (zip ts ts'))
+              return $ Just $ DictCan evterm ct'
+            else MaybeT $ return Nothing
+        _ -> MaybeT $ return Nothing
+    _ -> MaybeT $ return Nothing
+
+-- | Try put a single constraint into Z3's context.
+intuitionZ3 ::
      (?cmdargs :: Arg, MonadZ3 m)
   => Constraint
   -> [Ct]
   -> [Ct]
   -> Ct
-  -> MaybeT (StateT Env m) EvTerm
-intuition ctx given derived wanted =
+  -> MaybeT (StateT Env m) Progress
+intuitionZ3 ctx given derived wanted =
   case wanted of
     CNonCanonical (CtWanted pred _ _ _) ->
       case classifyPredType pred of
-        EqPred NomEq t1 t2 -> smt ctx t1 t2
+        EqPred NomEq t1 t2 -> NonCanonical <$> smt ctx t1 t2
         _ -> MaybeT $ return Nothing
     _ -> MaybeT $ return Nothing

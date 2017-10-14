@@ -22,6 +22,8 @@ module Plugin.Intuition.GHC
   , findImportedModule
   , lookupOrig
   , tcLookupTyCon
+    -- * Constraints and CtEvidence
+  , newWanted
     -- * Names
   , OccName
   , mkModuleName
@@ -52,6 +54,8 @@ module Plugin.Intuition.GHC
   , UnivCoProvenance(..)
   , EvTerm(..)
   , Coercion(..)
+  , mkReflCo
+  , mkTyConAppCo
   , mkUnivCo
     -- * Pretty-print
   , SDoc
@@ -68,6 +72,8 @@ import Plugins (Plugin(..), CommandLineOption, defaultPlugin)
 -- | Modules
 import TcPluginM (FindResult(..))
 import TcPluginM (findImportedModule, tcLookupTyCon, lookupOrig)
+-- | Create new constraints (CtEvidence)
+import TcPluginM (newWanted)
 -- | Names
 import Module (mkModuleName)
 import OccName (OccName, mkOccName, mkTcOcc)
@@ -86,7 +92,7 @@ import TcRnTypes (CtEvidence(..))
 import TyCoRep (UnivCoProvenance(..))
 import TcEvidence (EvTerm(..))
 import TyCoRep (Coercion(..))
-import Coercion (mkUnivCo)
+import Coercion (mkReflCo, mkTyConAppCo, mkUnivCo)
 -- | Pretty-print
 import Outputable (SDoc, ppr, text, pprPanic, showSDocUnsafe)
 -- | Misc
